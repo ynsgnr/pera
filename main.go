@@ -1,28 +1,24 @@
 package main
 
 import (
-	"bufio"
-	"fmt"
 	"image"
 	_ "image/png"
-	"log"
 	"os"
 	"path"
-	"runtime"
-	"strconv"
-	"strings"
-	"time"
+	"runtime"	
+	"fmt"
 
-	gutter "github.com/Drakirus/go-flutter-desktop-embedder"
-	"github.com/Drakirus/go-flutter-desktop-embedder/flutter"
-
+	"github.com/go-flutter-desktop/go-flutter"
+	"github.com/go-flutter-desktop/go-flutter/embedder"
 	"github.com/go-gl/glfw/v3.2/glfw"
+
+	"github.com/ynsgnr/aria2go"
+
 )
 
+var downloader aria2go.Aria2go
+
 func main() {
-	var (
-		err error
-	)
 
 	_, currentFilePath, _, _ := runtime.Caller(0)
 	dir := path.Dir(currentFilePath)
@@ -30,66 +26,52 @@ func main() {
 	initialApplicationHeight := 600
 	initialApplicationWidth := 800
 
-	options := []gutter.Option{
-		gutter.ProjectAssetPath(dir + "/build/flutter_assets"),
-		/* This path should not be changed. icudtl.dat is handled by engineDownloader.go */
-		gutter.ApplicationICUDataPath(dir + "/icudtl.dat"),
-		gutter.ApplicationWindowDimension(initialApplicationWidth, initialApplicationHeight),
-		gutter.OptionWindowInitializer(setIcon),
-		gutter.OptionPixelRatio(1.2),
-		gutter.OptionVMArguments([]string{"--dart-non-checked-mode", "--observatory-port=50300"}),
-		gutter.OptionAddPluginReceiver(ownPlugin, "plugin_demo"),
-		// Default keyboard is Qwerty, if you want to change it, you can check keyboard.go in gutter package.
-		// Otherwise you can create your own by usinng `KeyboardShortcuts` struct.
-		//gutter.OptionKeyboardLayout(gutter.KeyboardAzertyLayout),
+	options := []flutter.Option{
+		flutter.ProjectAssetsPath(dir + "/build/flutter_assets"),
+
+		// This path should not be changed. icudtl.dat is handled by engineDownloader.go
+		flutter.ApplicationICUDataPath(dir + "/icudtl.dat"),
+
+		flutter.ApplicationWindowDimension(initialApplicationWidth, initialApplicationHeight),
+		flutter.WindowIcon(iconProvider),
+		flutter.OptionVMArguments([]string{
+			// "--disable-dart-asserts", // release mode flag
+			// "--disable-observatory",
+			"--observatory-port=50300",
+		}),
+		flutter.OptionAddPluginReceiver(aria2Plugin, "aria2Plugin"),
 	}
 
-	if err = gutter.Run(options...); err != nil {
-		log.Fatalln(err)
+	downloader = aria2go.New()
+	downloader.KeepRunning()
+
+	if err := flutter.Run(options...); err != nil {
+		fmt.Printf("Failed running the Flutter app: %v\n", err)
+		os.Exit(1)
 	}
+
+	downloader.Finalize()
 
 }
 
-func setIcon(window *glfw.Window) error {
+func iconProvider() ([]image.Image, error) {
 	_, currentFilePath, _, _ := runtime.Caller(0)
 	dir := path.Dir(currentFilePath)
 	imgFile, err := os.Open(dir + "/assets/icon.png")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	img, _, err := image.Decode(imgFile)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	window.SetIcon([]image.Image{img})
-	return nil
+	return []image.Image{img}, nil
 }
 
-// Plugin that read the stdin and send the number to the dart side
-func ownPlugin(
-	platMessage *flutter.PlatformMessage,
-	flutterEngine *flutter.EngineOpenGL,
+func aria2Plugin(
+	platMessage *embedder.PlatformMessage,
+	flutterEngine *embedder.FlutterEngine,
 	window *glfw.Window,
 ) bool {
-	if platMessage.Message.Method != "getNumber" {
-		log.Printf("Unhandled platform method: %#v from channel %#v\n",
-			platMessage.Message.Method, platMessage.Channel)
-		return false
-	}
-
-	time.Sleep(1 * time.Second)
-	go func() {
-		fmt.Printf("Reading (A number): ")
-		reader := bufio.NewReader(os.Stdin)
-		s, _ := reader.ReadString('\n')
-		s = strings.TrimRight(s, "\r\n")
-		if _, err := strconv.Atoi(s); err == nil {
-			flutterEngine.SendPlatformMessageResponse(platMessage, []byte("[ "+s+" ]"))
-		} else {
-			fmt.Printf(" ,%q don't looks like a number.\n", s)
-		}
-	}()
-
 	return true
-
 }

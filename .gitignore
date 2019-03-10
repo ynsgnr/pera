@@ -75,3 +75,6 @@ build/
 flutter_engine.dll
 icudtl.dat
 main.exe
+
+*.o
+_*
